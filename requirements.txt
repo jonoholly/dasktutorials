@@ -4,3 +4,5 @@ dask
 ipython
 nltk
 graphviz
+scikit-learn
+matplotlib

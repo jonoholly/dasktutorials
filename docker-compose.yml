@@ -7,4 +7,5 @@ services:
       - ./data:/data
       # prevents container rebuild when src changes
       - ./app:/app 
+      - ./vis:/vis
     stdin_open: true

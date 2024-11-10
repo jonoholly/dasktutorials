@@ -1,6 +1,6 @@
 pandas
 numpy
-dask
+dask[dataframe]
 ipython
 nltk
 graphviz

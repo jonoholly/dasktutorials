@@ -1,0 +1,6 @@
+pandas
+numpy
+dask
+ipython
+nltk
+graphviz

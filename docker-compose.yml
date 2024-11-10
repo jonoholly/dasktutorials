@@ -1,0 +1,10 @@
+services:
+  dev:
+    build:
+      context: .
+    container_name: dask
+    volumes:
+      - ./data:/data
+      # prevents container rebuild when src changes
+      - ./app:/app 
+    stdin_open: true

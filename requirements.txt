@@ -6,3 +6,6 @@ nltk
 graphviz
 scikit-learn
 matplotlib
+holoviews
+geoviews
+datashader

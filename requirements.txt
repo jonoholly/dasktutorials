@@ -9,3 +9,4 @@ matplotlib
 holoviews
 geoviews
 datashader
+nltk

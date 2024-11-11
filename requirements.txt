@@ -10,3 +10,5 @@ holoviews
 geoviews
 datashader
 nltk
+dask_ml
+zarr

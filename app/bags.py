@@ -4,10 +4,12 @@ import dask.bag as bag
 import os
 from dask.delayed import delayed
 from dask.diagnostics import ProgressBar
+import numpy as np
+from dask import array as dask_array
 
 os.chdir("/data")
 raw_data = bag.read_text("finefoods.txt", encoding="cp1252")  # note - fails with UTF-8
-raw_data.count().copmuet()
+# raw_data.count().compute()
 
 # okay, now implement it ourselves
 
@@ -56,7 +58,7 @@ def get_item(filename, start_index, delimiter_position, encoding="cp1252"):
 
 
 reviews = bag.from_sequence(output).map(lambda x: get_item("finefoods.txt", x[0], x[1]))
-reviews.take(3)  # see examples
+# reviews.take(3)  # see examples
 
 
 # extract values from dictionary
@@ -229,3 +231,126 @@ with ProgressBar():
         .compute()
     )
 top10_bigrams
+
+
+# okay now use this to do ML
+def tag_positive_negative_by_score(element):
+    if float(element["review/score"]) > 3:
+        element["review/sentiment"] = "positive"
+    else:
+        element["review/sentiment"] = "negative"
+    return element
+
+
+tagged_reviews = reviews.map(tag_positive_negative_by_score)
+from nltk.corpus import stopwords
+from nltk.tokenize import RegexpTokenizer
+from functools import partial
+
+tokenizer = RegexpTokenizer(r"\w+")
+
+
+def extract_reviews(element):
+    element["review/tokens"] = element["review/text"].lower()
+    return element
+
+
+def tokenize_reviews(element):
+    element["review/tokens"] = tokenizer.tokenize(element["review/tokens"])
+    return element
+
+
+def filter_stopwords(element, stopwords):
+    element["review/tokens"] = list(
+        filter(partial(filter_stopword, stopwords=stopwords), element["review/tokens"])
+    )
+    return element
+
+
+def extract_tokens(element):
+    return element["review/tokens"]
+
+
+stopword_set = set(stopwords.words("english"))
+more_stopwords = {"br", "amazon", "com", "http", "www", "href", "gp"}
+all_stopwords = stopword_set.union(more_stopwords)
+
+review_extracted_text = tagged_reviews.map(extract_reviews)
+
+review_tokens = review_extracted_text.map(tokenize_reviews)
+review_text_clean = review_tokens.map(
+    partial(filter_stopwords, stopwords=all_stopwords)
+)
+extracted_tokens = review_text_clean.map(extract_tokens)
+unique_tokens = extracted_tokens.flatten().distinct()
+
+with ProgressBar():
+    number_of_tokens = unique_tokens.count().compute()
+number_of_tokens
+
+
+# find top 100 words
+def count(accumulator, element):
+    return accumulator + 1
+
+
+def combine(total_1, total_2):
+    return total_1 + total_2
+
+
+with ProgressBar():
+    token_counts = (
+        extracted_tokens.flatten().foldby(lambda x: x, count, 0, combine, 0).compute()
+    )
+
+top_tokens = sorted(token_counts, key=lambda x: x[1], reverse=True)
+top_100_tokens = list(map(lambda x: x[0], top_tokens[:100]))
+
+
+# apply binary vectorization
+def vectorize_tokens(element):
+    vectorized_tokens = np.where(
+        np.isin(top_100_tokens, element["review/tokens"]), 1, 0
+    )
+    element["review/token_vector"] = vectorized_tokens
+    return element
+
+
+def prep_model_data(element):
+    return {
+        "target": 1 if element["review/sentiment"] == "positive" else 0,
+        "features": element["review/token_vector"],
+    }
+
+
+# map in the token vectors to 'review/token_vector', then convert to numpy form
+model_data = review_text_clean.map(vectorize_tokens).map(prep_model_data)
+
+model_data.take(5)
+
+
+def stacker(partition):
+    return dask_array.concatenate([element for element in partition])
+
+
+with ProgressBar():
+    feature_arrays = (
+        model_data.pluck("features")
+        .map(lambda x: dask_array.from_array(x, 1000).reshape(1, -1))
+        .reduction(perpartition=stacker, aggregate=stacker)
+    )
+    feature_array = feature_arrays.compute()
+feature_array
+
+with ProgressBar():
+    feature_array.rechunk(5000).to_zarr("/data/sentiment_feature_array.zarr")
+    # feature_array = dask_array.from_zarr("/data/sentiment_feature_array.zarr")
+
+
+with ProgressBar():
+    target_arrays = (
+        model_data.pluck("target")
+        .map(lambda x: dask_array.from_array(x, 1000).reshape(-1, 1))
+        .reduction(perpartition=stacker, aggregate=stacker)
+    )
+    target_arrays.compute().rechunk(5000).to_zarr("/data/sentiment_target_array.zarr")

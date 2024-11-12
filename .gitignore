@@ -3,8 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# data class
+# files to ignore for project
 data/
+data-science-python-dask/
 
 # C extensions
 *.so
